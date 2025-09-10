@@ -20,14 +20,34 @@ jobs:
         sudo apt-get install -y \
           bc bison flex build-essential libssl-dev \
           gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-          git wget cpio
+          git wget cpio unzip rustc cargo
+
+    # Cache clang toolchain
+    - name: Cache clang toolchain
+      id: cache-clang
+      uses: actions/cache@v3
+      with:
+        path: ~/toolchains/clang-r416183b
+        key: clang-r416183b
 
     - name: Download clang-r416183b
+      if: steps.cache-clang.outputs.cache-hit != 'true'
       run: |
         mkdir -p $HOME/toolchains
         cd $HOME/toolchains
-        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-12.0.0_r36/clang-r416183b.tar.gz
-        mkdir clang-r416183b && tar -xf clang-r416183b.tar.gz -C clang-r416183b
+        git clone --depth=1 --branch aml_tz3_314012070 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
+        mv linux-x86/clang-r416183b clang-r416183b
+        rm -rf linux-x86
+
+    # Cache kernel build output
+    - name: Cache kernel build output
+      id: cache-build
+      uses: actions/cache@v3
+      with:
+        path: out
+        key: kernel-${{ github.sha }}
+        restore-keys: |
+          kernel-
 
     - name: Build Kernel
       run: |
@@ -41,13 +61,51 @@ jobs:
         export PLATFORM_VERSION=12
         export ANDROID_MAJOR_VERSION=s
 
-        make s5e8825-m34xnsxx_defconfig
-        make -j$(nproc)
+        mkdir -p out
+        make O=out s5e8825-m34xnsxx_defconfig
+        make O=out -j$(nproc)
+
+    - name: Download stock boot.img
+      run: |
+        mkdir stock
+        # Option A: Place stock_boot.img in repo
+        cp stock_boot.img stock/boot.img || true
+        # Option B: Or download via URL
+        # wget -O stock/boot.img <URL_TO_STOCK_BOOT_IMG>
+
+    - name: Build and install magiskboot
+      run: |
+        git clone --depth=1 https://github.com/topjohnwu/Magisk.git
+        cd Magisk
+        cargo build --release -p magiskboot
+        sudo cp target/release/magiskboot /usr/local/bin/
+
+    - name: Repack boot.img with new kernel
+      run: |
+        mkdir repack && cd repack
+        cp ../stock/boot.img .
+        magiskboot unpack boot.img
+
+        # Replace kernel with new Image
+        cp ../out/arch/arm64/boot/Image kernel
+
+        # Replace dtbo if exists
+        if [ -f ../out/arch/arm64/boot/dtbo.img ]; then
+          cp ../out/arch/arm64/boot/dtbo.img dtbo.img
+        fi
+
+        magiskboot repack boot.img new-boot.img
+        cd ..
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: kernel-output
         path: |
-          arch/arm64/boot/Image
-          drivers/*/*.ko
+          out/arch/arm64/boot/Image
+          out/arch/arm64/boot/Image.gz
+          out/arch/arm64/boot/dtbo.img
+          out/arch/arm64/boot/dts/**/*.dtb
+          out/**/*.ko
+          out/.config
+          repack/new-boot.img
