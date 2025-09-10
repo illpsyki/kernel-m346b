@@ -20,9 +20,9 @@ jobs:
         sudo apt-get install -y \
           bc bison flex build-essential libssl-dev \
           gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-          git wget cpio unzip rustc cargo
+          git wget cpio
 
-    # Cache clang toolchain
+    # Cache the clang toolchain
     - name: Cache clang toolchain
       id: cache-clang
       uses: actions/cache@v3
@@ -49,6 +49,14 @@ jobs:
         restore-keys: |
           kernel-
 
+    # 🔧 Patch defconfig to disable Samsung TUI
+    - name: Patch defconfig
+      run: |
+        DEFCONFIG="arch/arm64/configs/s5e8825-m34xnsxx_defconfig"
+        echo "# CONFIG_SAMSUNG_TUI is not set" >> $DEFCONFIG
+        echo "# CONFIG_SAMSUNG_TUI_LOWLEVEL is not set" >> $DEFCONFIG
+        echo "# CONFIG_SAMSUNG_TUI_TEST is not set" >> $DEFCONFIG
+
     - name: Build Kernel
       run: |
         export PATH=$HOME/toolchains/clang-r416183b/bin:$PATH
@@ -62,40 +70,9 @@ jobs:
         export ANDROID_MAJOR_VERSION=s
 
         mkdir -p out
+        make O=out clean
         make O=out s5e8825-m34xnsxx_defconfig
         make O=out -j$(nproc)
-
-    - name: Download stock boot.img
-      run: |
-        mkdir stock
-        # Option A: Place stock_boot.img in repo
-        cp stock_boot.img stock/boot.img || true
-        # Option B: Or download via URL
-        # wget -O stock/boot.img <URL_TO_STOCK_BOOT_IMG>
-
-    - name: Build and install magiskboot
-      run: |
-        git clone --depth=1 https://github.com/topjohnwu/Magisk.git
-        cd Magisk
-        cargo build --release -p magiskboot
-        sudo cp target/release/magiskboot /usr/local/bin/
-
-    - name: Repack boot.img with new kernel
-      run: |
-        mkdir repack && cd repack
-        cp ../stock/boot.img .
-        magiskboot unpack boot.img
-
-        # Replace kernel with new Image
-        cp ../out/arch/arm64/boot/Image kernel
-
-        # Replace dtbo if exists
-        if [ -f ../out/arch/arm64/boot/dtbo.img ]; then
-          cp ../out/arch/arm64/boot/dtbo.img dtbo.img
-        fi
-
-        magiskboot repack boot.img new-boot.img
-        cd ..
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
@@ -103,9 +80,4 @@ jobs:
         name: kernel-output
         path: |
           out/arch/arm64/boot/Image
-          out/arch/arm64/boot/Image.gz
-          out/arch/arm64/boot/dtbo.img
-          out/arch/arm64/boot/dts/**/*.dtb
-          out/**/*.ko
-          out/.config
-          repack/new-boot.img
+          out/drivers/*/*.ko
