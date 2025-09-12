@@ -20,7 +20,7 @@ jobs:
         sudo apt-get install -y \
           bc bison flex build-essential libssl-dev \
           gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-          git wget cpio unzip rustc cargo
+          git wget cpio unzip
 
     # Cache clang toolchain
     - name: Cache clang toolchain
@@ -49,13 +49,15 @@ jobs:
         restore-keys: |
           kernel-
 
-    # Patch defconfig to disable Samsung TUI
+    # Patch defconfig and versioning
     - name: Patch defconfig
       run: |
         DEFCONFIG="arch/arm64/configs/s5e8825-m34xnsxx_defconfig"
         echo "# CONFIG_SAMSUNG_TUI is not set" >> $DEFCONFIG
         echo "# CONFIG_SAMSUNG_TUI_LOWLEVEL is not set" >> $DEFCONFIG
         echo "# CONFIG_SAMSUNG_TUI_TEST is not set" >> $DEFCONFIG
+        echo "CONFIG_LOCALVERSION_AUTO=n" >> $DEFCONFIG
+        echo "-android12-9-31153516-abM346BXXU7DYE1" > localversion
 
     - name: Build Kernel
       run: |
@@ -74,42 +76,35 @@ jobs:
         make O=out s5e8825-m34xnsxx_defconfig
         make O=out -j$(nproc)
 
-    - name: Download stock boot.img
+    - name: Download Magisk v30.2 and extract magiskboot
       run: |
-        mkdir stock
-        # Option A: Place stock_boot.img in repo root before pushing
-        cp stock_boot.img stock/boot.img || true
-        # Option B: Download from a direct link
-        # wget -O stock/boot.img <URL_TO_STOCK_BOOT_IMG>
+        wget https://github.com/topjohnwu/Magisk/releases/download/v30.2/Magisk-v30.2.apk -O Magisk-v30.2.apk
+        unzip -j Magisk-v30.2.apk "lib/arm64-v8a/libmagiskboot.so" -d .
+        mv libmagiskboot.so magiskboot
+        chmod +x magiskboot
 
-    - name: Build and install magiskboot
+    - name: Prepare Image.gz
       run: |
-        git clone --depth=1 https://github.com/topjohnwu/Magisk.git
-        cd Magisk
-        cargo build --release -p magiskboot
-        sudo cp target/release/magiskboot /usr/local/bin/
+        cp out/arch/arm64/boot/Image ./Image
+        # gzip compress
+        ./magiskboot compress=gzip Image Image.gz
+
+    - name: Provide stock boot.img
+      run: |
+        mkdir -p stock
+        # Either commit the stock boot.img into your repo under stock/boot.img
+        cp stock_boot.img stock/boot.img || true
+        # Or download it if you have a URL
+        # wget -O stock/boot.img YOUR_STOCK_BOOT_IMG_LINK
 
     - name: Repack boot.img with new kernel
       run: |
-        mkdir repack && cd repack
-        cp ../stock/boot.img . || { echo "❌ stock/boot.img not found"; exit 1; }
-        magiskboot unpack boot.img
-
-        # Replace kernel with correct format
-        if [ -f ../out/arch/arm64/boot/Image.gz-dtb ]; then
-          cp ../out/arch/arm64/boot/Image.gz-dtb kernel
-        elif [ -f ../out/arch/arm64/boot/Image.gz ]; then
-          cp ../out/arch/arm64/boot/Image.gz kernel
-        else
-          cp ../out/arch/arm64/boot/Image kernel
-        fi
-
-        # Replace dtbo if exists
-        if [ -f ../out/arch/arm64/boot/dtbo.img ]; then
-          cp ../out/arch/arm64/boot/dtbo.img dtbo.img
-        fi
-
-        magiskboot repack boot.img new-boot.img
+        mkdir repack
+        cd repack
+        cp ../stock/boot.img boot.img
+        ../magiskboot unpack boot.img
+        cp ../Image.gz kernel
+        ../magiskboot repack boot.img new-boot.img
         cd ..
 
     - name: Upload build artifacts
@@ -118,10 +113,6 @@ jobs:
         name: kernel-output
         path: |
           out/arch/arm64/boot/Image
-          out/arch/arm64/boot/Image.gz
-          out/arch/arm64/boot/Image.gz-dtb
-          out/arch/arm64/boot/dtbo.img
-          out/arch/arm64/boot/dts/**/*.dtb
-          out/**/*.ko
-          out/.config
+          Image.gz
+          magiskboot
           repack/new-boot.img
