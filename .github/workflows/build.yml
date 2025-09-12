@@ -79,7 +79,7 @@ jobs:
     - name: Download Magisk v30.2 and extract magiskboot
       run: |
         wget https://github.com/topjohnwu/Magisk/releases/download/v30.2/Magisk-v30.2.apk -O Magisk-v30.2.apk
-        unzip -j Magisk-v30.2.apk "lib/arm64-v8a/libmagiskboot.so" -d .
+        unzip -j Magisk-v30.2.apk "lib/x86_64/libmagiskboot.so" -d .
         mv libmagiskboot.so magiskboot
         chmod +x magiskboot
 
