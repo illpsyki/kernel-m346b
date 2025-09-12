@@ -59,6 +59,7 @@ jobs:
         echo "CONFIG_LOCALVERSION_AUTO=n" >> $DEFCONFIG
         echo "-android12-9-31153516-abM346BXXU7DYE1" > localversion
 
+    # Build kernel
     - name: Build Kernel
       run: |
         export PATH=$HOME/toolchains/clang-r416183b/bin:$PATH
@@ -70,49 +71,16 @@ jobs:
         export TARGET_SOC=s5e8825
         export PLATFORM_VERSION=12
         export ANDROID_MAJOR_VERSION=s
-
         mkdir -p out
         make O=out clean
         make O=out s5e8825-m34xnsxx_defconfig
         make O=out -j$(nproc)
 
-    - name: Download Magisk v30.2 and extract magiskboot
-      run: |
-        wget https://github.com/topjohnwu/Magisk/releases/download/v30.2/Magisk-v30.2.apk -O Magisk-v30.2.apk
-        unzip -j Magisk-v30.2.apk "lib/x86_64/libmagiskboot.so" -d .
-        mv libmagiskboot.so magiskboot
-        chmod +x magiskboot
-
-    - name: Prepare Image.gz
-      run: |
-        cp out/arch/arm64/boot/Image ./Image
-        # gzip compress
-        ./magiskboot compress=gzip Image Image.gz
-
-    - name: Provide stock boot.img
-      run: |
-        mkdir -p stock
-        # Either commit the stock boot.img into your repo under stock/boot.img
-        cp stock_boot.img stock/boot.img || true
-        # Or download it if you have a URL
-        # wget -O stock/boot.img YOUR_STOCK_BOOT_IMG_LINK
-
-    - name: Repack boot.img with new kernel
-      run: |
-        mkdir repack
-        cd repack
-        cp ../stock/boot.img boot.img
-        ../magiskboot unpack boot.img
-        cp ../Image.gz kernel
-        ../magiskboot repack boot.img new-boot.img
-        cd ..
-
+    # Upload kernel build artifacts
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: kernel-output
         path: |
           out/arch/arm64/boot/Image
-          Image.gz
-          magiskboot
-          repack/new-boot.img
+          out/arch/arm64/boot/Image.gz
